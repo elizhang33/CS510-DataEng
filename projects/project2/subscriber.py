@@ -63,15 +63,15 @@ def validate(record):
     try:
         if not record.get("EVENT_NO_TRIP"):
             return False
-        if record["GPS_LATITUDE"] < 45.0 or record["GPS_LATITUDE"] > 46.0:
+        if record.get("GPS_LATITUDE") is None or not (45.0 <= record["GPS_LATITUDE"] <= 46.0):
             return False
-        if record["GPS_LONGITUDE"] < -124.0 or record["GPS_LONGITUDE"] > -121.0:
+        if record.get("GPS_LONGITUDE") is None or not (-124.0 <= record["GPS_LONGITUDE"] <= -121.0):
             return False
-        if not isinstance(record["VEHICLE_ID"], int) or record["VEHICLE_ID"] <= 0:
+        if not isinstance(record.get("VEHICLE_ID"), int) or record["VEHICLE_ID"] <= 0:
             return False
-        if record["GPS_HDOP"] > 5.0:
+        if record.get("GPS_HDOP") is None or record["GPS_HDOP"] > 5.0:
             return False
-        if record["ACT_TIME"] < 0 or record["ACT_TIME"] > 86400:
+        if record.get("ACT_TIME") is None or not (0 <= record["ACT_TIME"] <= 86400):
             return False
     except KeyError:
         return False
@@ -81,7 +81,7 @@ def compute_speed(current, previous):
     d_meters = current["METERS"] - previous["METERS"]
     d_seconds = current["ACT_TIME"] - previous["ACT_TIME"]
     if d_seconds > 0:
-        return d_meters / d_seconds
+        return round(d_meters / d_seconds, 2)
     return 0.0
 
 def cache_and_insert_breadcrumb(timestamp, lat, lon, speed, trip_id):
