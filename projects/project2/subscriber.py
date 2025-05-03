@@ -17,7 +17,7 @@ os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = CREDENTIAL_PATH
 conn = psycopg2.connect(
     dbname="postgres",
     user="postgres",
-    password="psql908243",
+    password="XXXXXXXXXX",
     host="localhost",
     port="5432"
 )
