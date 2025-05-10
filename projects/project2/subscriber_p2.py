@@ -19,8 +19,8 @@ os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = CREDENTIAL_PATH
 
 DB_CONFIG = {
     "dbname": "postgres",
-    "user": "postgres",
-    "password": "psql908243",
+    "user": "",
+    "password": "",
     "host": "localhost",
     "port": "5432"
 }
