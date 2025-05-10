@@ -3,7 +3,8 @@ import json
 import urllib.request
 import datetime
 import time
-from concurrent import futures
+from concurrent.futures import wait
+from concurrent.futures import as_completed
 from google.cloud import pubsub_v1
 
 # === CONFIGURATION ===
@@ -12,46 +13,42 @@ TOPIC_ID = "trimet-breadcrumbs"
 CREDENTIAL_PATH = "/home/xiangqz/pubsub-key.json"
 VEHICLE_FILE = "vehicle_ids.txt"
 DAILY_FILE = f"breadcrumbs_{datetime.datetime.now().strftime('%Y%m%d')}.json"
-ALL_FILE = "bcsample.json"
 
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = CREDENTIAL_PATH
 publisher = pubsub_v1.PublisherClient()
 topic_path = publisher.topic_path(PROJECT_ID, TOPIC_ID)
 
-def log(msg, scope = "main"):
+def log(msg, scope="main"):
     ts = datetime.datetime.now().strftime("[%m-%d-%Y--%H:%M:%S.%f]")[:-3]
     full_msg = f"{ts} {msg}"
     print(full_msg)
-
-    if scope == "gather":
-        with open("data_gather.log", "a") as f:
-            f.write(full_msg + "\n")
-    elif scope == "publish":
-        with open("data_pub.log", "a") as f:
-            f.write(full_msg + "\n")
-    else:
-        with open("pipeline.log", "a") as f:
-            f.write(full_msg + "\n")
+    log_file = {
+        "gather": "data_gather.log",
+        "publish": "data_pub.log"
+    }.get(scope, "pipeline.log")
+    with open(log_file, "a") as f:
+        f.write(full_msg + "\n")
 
 def gather_data():
-    log("Gathering from PSU API...")
+    log("Gathering from PSU API...", "gather")
     try:
         with open(VEHICLE_FILE, "r") as f:
             vehicle_ids = [line.strip() for line in f if line.strip()]
     except Exception as e:
-        log(f"Error reading vehicle file: {e}")
+        log(f"Error reading vehicle file: {e}", "gather")
         return []
 
-    # Load today's file if it exists
+    existing_records = set()
     if os.path.exists(DAILY_FILE):
         with open(DAILY_FILE, "r") as f:
-            today_data = json.load(f)
-        record_set = {json.dumps(rec, sort_keys=True) for rec in today_data}
-    else:
-        today_data = []
-        record_set = set()
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                    existing_records.add(json.dumps(rec, sort_keys=True))
+                except json.JSONDecodeError:
+                    continue
 
-    new_data = []
+    new_records = []
 
     for vid in vehicle_ids:
         url = f"https://busdata.cs.pdx.edu/api/getBreadCrumbs?vehicle_id={vid}"
@@ -61,70 +58,53 @@ def gather_data():
                     records = json.loads(response.read())
                     for record in records:
                         record_str = json.dumps(record, sort_keys=True)
-                        if record_str not in record_set:
-                            today_data.append(record)
-                            new_data.append(record)
-                            record_set.add(record_str)
+                        if record_str not in existing_records:
+                            new_records.append(record)
+                            existing_records.add(record_str)
         except Exception as e:
-            log(f"Fetch error for vehicle {vid}: {e}")
+            log(f"Fetch error for vehicle {vid}: {e}", "gather")
 
-    # Save updated daily file
-    if new_data:
-        with open(DAILY_FILE, "w") as f:
-             for record in today_data:
-                 json.dump(record, f)
-                 f.write("\n")
-                 #json.dump(today_data, f, indent=2)
-        log(f"Updated daily file: {DAILY_FILE} with {len(new_data)} new records")
-
-        # Append to cumulative file
-        #if os.path.exists(ALL_FILE):
-        #    with open(ALL_FILE, "r") as f:
-        #        all_data = json.load(f)
-        #else:
-        #    all_data = []
-
-        #all_data.extend(new_data)
-
-        #with open(ALL_FILE, "w") as f:
-        #    json.dump(all_data, f, indent=2)
-
-        #log(f"Appended to {ALL_FILE}. Total records: {len(all_data)}")
-
+    if new_records:
+        with open(DAILY_FILE, "a") as f:
+            for record in new_records:
+                json.dump(record, f)
+                f.write("\n")
+        log(f"Appended {len(new_records)} new records to {DAILY_FILE}", "gather")
     else:
-        log("No new records fetched today.")
+        log("No new records fetched today.", "gather")
 
-    return new_data
+    return new_records
 
 def publish_data(records):
-    log("Starting publishing...")
-    futures_list = []
-    count = 0
+    log("Starting publishing...", "publish")
+    published = 0
+    skipped = 0
+    futures = []
 
-    def future_callback(fut):
+    def future_callback(fut, idx):
         try:
             fut.result()
         except Exception as e:
-            log(f"Publish error: {e}")
+            log(f"[ERROR] Record {idx} failed to publish: {e}", "publish")
 
-    for record in records:
+    for i, record in enumerate(records, start=1):
         try:
-            data = json.dumps(record).encode("utf-8")
-            future = publisher.publish(topic_path, data)
-            future.add_done_callback(future_callback)
-            futures_list.append(future)
-            count += 1
-
-            if count % 50000 == 0:
-                log(f"{count} records queued for publish...")
-
+            message = json.dumps(record).encode("utf-8")
+            future = publisher.publish(topic_path, message)
+            future.add_done_callback(lambda fut, idx=i: future_callback(fut, idx))
+            futures.append(future)
+            published += 1
+            if published % 50000 == 0:
+                log(f"{published} records queued...", "publish")
         except Exception as e:
-            log(f"Unexpected publish error: {e}")
+            skipped += 1
+            log(f"[ERROR] Record {i} failed to publish: {e}", "publish")
 
-    for fut in futures.as_completed(futures_list):
+    log(f"Waiting for {len(futures)} publishes to complete...", "publish")
+    for fut in as_completed(futures):
         pass
 
-    log(f"Publishing complete. Total published: {count}")
+    log(f"[DONE] Published: {published}, Skipped: {skipped}", "publish")
 
 def main():
     start = time.time()
@@ -132,10 +112,9 @@ def main():
 
     new_records = gather_data()
 
-    
     if new_records:
-        log("Waiting 60 seconds before publishing...", scope="publish")
-        time.sleep(60)
+        log("Waiting 10 seconds before publishing...", "publish")
+        time.sleep(10)
         publish_data(new_records)
 
     end = time.time()
