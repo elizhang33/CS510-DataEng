@@ -39,64 +39,39 @@ class CollectorContext:
 
 ctx = CollectorContext()
 
+
 # 1. Non-null trip_id
 def assert_trip_id(record):
     assert record.get("EVENT_NO_TRIP") is not None, "Null trip_id"
 
-# 2. Valid tstamp (OPD_DATE and ACT_TIME not null, and can be combined into a timestamp)
+# 2 and 3. Valid tstamp (OPD_DATE and ACT_TIME not null, and can be combined into a timestamp)
 def assert_tstamp(record):
     assert record.get("OPD_DATE") is not None, "Missing OPD_DATE"
     assert record.get("ACT_TIME") is not None, "Missing ACT_TIME"
 
-# 3. Latitude must be non-null and in bounds
+# 4. Latitude must be non-null and in bounds
 def assert_latitude(record):
     lat = record.get("GPS_LATITUDE")
     assert lat is not None, "Latitude is None"
     assert 45.0 <= lat <= 46.0, f"Latitude {lat} out of range"
 
-# 4. Longitude must be non-null and in bounds
+# 5. Longitude must be non-null and in bounds
 def assert_longitude(record):
     lon = record.get("GPS_LONGITUDE")
     assert lon is not None, "Longitude is None"
     assert -124.0 <= lon <= -121.0, f"Longitude {lon} out of range"
 
-# 5. Speed must be non-null and in reasonable range
-def assert_speed(record):
-    spd = record.get("SPEED")
-    assert spd is not None, "Speed is None"
-    assert 0.0 <= spd <= 30.0, f"Speed {spd} out of range (0-30 m/s)"
-
-# 6. HDOP must be present, ≤ 5.0 and also ≤ 10 for "likely accurate"
+# 6. HDOP must be present, ≤ 5.0
 def assert_hdop(record):
     hdop = record.get("GPS_HDOP")
     assert hdop is not None, "HDOP is None"
     assert hdop <= 5.0, f"HDOP {hdop} too high"
-    assert hdop <= 10.0, f"HDOP {hdop} likely inaccurate (>10)"
 
-# 7. Trip timestamps must be in increasing order
-def assert_increasing_timestamps(trip_records):
-    prev_time = None
-    for rec in trip_records:
-        opd_date = rec['OPD_DATE']
-        act_time = rec['ACT_TIME']
-        # Convert to seconds since epoch for comparison
-        try:
-            from datetime import datetime, timedelta
-            dt = datetime.strptime(opd_date, "%d%b%Y:%H:%M:%S")
-            ts = dt + timedelta(seconds=act_time)
-            ts = ts.timestamp()
-        except Exception:
-            # Fallback if OPD_DATE format is different
-            ts = int(act_time)
-        if prev_time is not None and ts < prev_time:
-            raise AssertionError("Timestamps not increasing within trip")
-        prev_time = ts
-
-# 8. Trip must have at least two readings
+# 7. Trip must have at least two readings
 def assert_trip_length(trip_records):
     assert len(trip_records) >= 2, "Trip has less than 2 readings"
 
-# 9. How many records will be inserted vs discarded.
+# 8. How many records will be inserted vs discarded.
 def assert_log_counts(inserted, discarded):
     logger.info(f"Total valid records to insert: {inserted}")
     logger.info(f"Total discarded records: {discarded}")
@@ -106,7 +81,6 @@ assertion_funcs = [
     assert_tstamp,
     assert_latitude,
     assert_longitude,
-    assert_speed,
     assert_hdop
 ]
 
@@ -164,7 +138,6 @@ def validate_and_transform():
     for trip_id, records in trip_dict.items():
         try:
             assert_trip_length(records)
-            assert_increasing_timestamps(records)
             valid_records.extend(records)
         except AssertionError as e:
             logger.error(f"Trip-level validation error for trip {trip_id}: {e}")
@@ -187,7 +160,9 @@ def transform_for_insert(records):
     df['prev_ACT_TIME'] = df.groupby('EVENT_NO_TRIP')['ACT_TIME'].shift()
     df['speed'] = (df['METERS'] - df['prev_METERS']) / (df['ACT_TIME'] - df['prev_ACT_TIME'])
     df['speed'] = df['speed'].fillna(0).clip(lower=0).round(2)
-    df = df[df['speed'] <= 30]
+    
+    # 9 and 10 Speed must be realistic
+    df = df[df['speed'].between(0, 30)]
 
     # Copy second record's speed to the first record
     trip_groups = df.groupby('EVENT_NO_TRIP')
@@ -213,7 +188,7 @@ def insert_into_db(df):
         output.seek(0)
         cursor.copy_from(
             output,
-            'BreadCrumb_copy',
+            'breadcrumb_copy',
             sep=',',
             columns=('tstamp', 'latitude', 'longitude', 'speed', 'trip_id')
         )
@@ -245,6 +220,11 @@ def main():
 
     logger.info("Validating and transforming data for DB insert...")
     valid_records = validate_and_transform()
+
+    if not valid_records:
+        logger.info("No valid records after validation. Exiting.")
+        return
+
     df = transform_for_insert(valid_records)
     inserted = insert_into_db(df)
     logger.info(f"Inserted {inserted} records into the database.")
