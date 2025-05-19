@@ -29,6 +29,12 @@ def log(msg, scope="main"):
     with open(log_file, "a") as f:
         f.write(full_msg + "\n")
 
+def future_callback(fut, idx):
+    try:
+        fut.result()
+    except Exception as e:
+        log(f"[ERROR] Record {idx} failed to publish: {e}", "publish")
+
 def gather_data():
     log("Gathering from PSU API...", "gather")
     try:
@@ -46,6 +52,7 @@ def gather_data():
                     rec = json.loads(line)
                     existing_records.add(json.dumps(rec, sort_keys=True))
                 except json.JSONDecodeError:
+                    log(f"JSON decode error in {DAILY_FILE}: {e}", "gather")
                     continue
 
     new_records = []
@@ -80,12 +87,6 @@ def publish_data(records):
     published = 0
     skipped = 0
     futures = []
-
-    def future_callback(fut, idx):
-        try:
-            fut.result()
-        except Exception as e:
-            log(f"[ERROR] Record {idx} failed to publish: {e}", "publish")
 
     for i, record in enumerate(records, start=1):
         try:
