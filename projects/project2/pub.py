@@ -3,8 +3,7 @@ import json
 import urllib.request
 import datetime
 import time
-from concurrent.futures import wait
-from concurrent.futures import as_completed
+from concurrent.futures import wait, FIRST_COMPLETED, as_completed
 from google.cloud import pubsub_v1
 
 # === CONFIGURATION ===
@@ -82,7 +81,7 @@ def gather_data():
 
     return new_records
 
-def publish_data(records):
+def publish_data(records, max_in_flight=500):
     log("Starting publishing...", "publish")
     published = 0
     skipped = 0
@@ -97,6 +96,11 @@ def publish_data(records):
             published += 1
             if published % 50000 == 0:
                 log(f"{published} records queued...", "publish")
+            # Throttle: only allow max_in_flight pending publihes
+            if len(futures) >= max_in_flight:
+                done, not_done = wait(futures, return_when=FIRST_COMPLETED)
+                # remove completed
+                futures = list(not_done)
         except Exception as e:
             skipped += 1
             log(f"[ERROR] Record {i} failed to publish: {e}", "publish")
