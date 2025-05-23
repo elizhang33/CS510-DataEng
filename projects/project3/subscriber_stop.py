@@ -18,10 +18,10 @@ IDLE_TIMEOUT = 60
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = CREDENTIAL_PATH
 
 DB_CONFIG = {
-    "dbname": "postgres",
-    "user": "postgres",
-    "password": "psql908243",
-    "host": "localhost",
+    "dbname": "XXXXXX",
+    "user": "XXXXXX",
+    "password": "XXXXXX",
+    "host": "XXXXXX",
     "port": "5432"
 }
 
@@ -185,101 +185,40 @@ def validate_and_transform():
     logger.info(f"Rows ready for Trip insertion: {len(df)}")
     return df
 
-def insert_into_trip_db(df):
-    """
-    Insert one row per unique trip into the Trip table with correct enum mapping.
-    """
+#: insert into stopevent table
+def insert_into_stopevent_db(df):
     if df.empty:
         return 0
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor()
-        # Build unique trip dataframe
-        trip_df = df.drop_duplicates(subset=['pdx_trip'])
-        trip_df = trip_df[trip_df['pdx_trip'].notnull() & trip_df['vehicle_number'].notnull()]
-        inserted = 0
-        for _, row in trip_df.iterrows():
-            trip_id = int(row['pdx_trip'])
-            route_id = int(row['route_number']) if pd.notnull(row['route_number']) else None
-            vehicle_id = int(row['vehicle_number']) if pd.notnull(row['vehicle_number']) else None
-            # Map service_key
-            sk = row.get('service_key')
-            if sk == 'W':
-                service_key = 'Weekday'
-            elif sk == 'S':
-                service_key = 'Saturday'
-            elif sk == 'U':
-                service_key = 'Sunday'
-            else:
-                service_key = None
-            # Map direction
-            direction_raw = str(row.get('direction'))
-            if direction_raw == '0':
-                direction = 'Out'
-            elif direction_raw == '1':
-                direction = 'Back'
-            else:
-                direction = None
-
-            try:
-                cursor.execute("""
-                    INSERT INTO trip (trip_id, route_id, vehicle_id, service_key, direction)
-                    VALUES (%s, %s, %s, %s, %s)
-                    ON CONFLICT DO NOTHING
-                """, (trip_id, route_id, vehicle_id, service_key, direction))
-                inserted += 1
-            except Exception as e:
-                error_type = "db_insert_error_trip"
-                error_counters[error_type] += 1
-                if error_type not in error_first_message:
-                    error_first_message[error_type] = f"DB insert error (trip): {e}"
-
+        output = io.StringIO()
+        df.to_csv(output, sep=',', header=False, index=False)
+        output.seek(0)
+        cursor.copy_from(
+            output,
+            'stopevent',
+            sep=',',
+            columns=(
+                'vehicle_number', 'leave_time', 'train', 'route_number', 'direction',
+                'service_key', 'trip_number', 'stop_time', 'arrive_time', 'dwell',
+                'location_id', 'door', 'lift', 'ons', 'offs', 'estimated_load',
+                'maximum_speed', 'train_mileage', 'pattern_distance', 'location_distance',
+                'x_coordinate', 'y_coordinate', 'data_source', 'schedule_status',
+                'pdx_trip', 'service_date'
+            )
+        )
         conn.commit()
         cursor.close()
         conn.close()
-        logger.info(f"Inserted {inserted} unique trips into Trip table.")
-        return inserted
+        logger.info(f"Inserted {len(df)} records into StopEvent table.")
+        return len(df)
     except Exception as e:
-        error_type = "db_insert_error_trip_outer"
+        error_type = "db_insert_error"
         error_counters[error_type] += 1
         if error_type not in error_first_message:
-            error_first_message[error_type] = f"DB insert error (trip, outer): {e}"
+            error_first_message[error_type] = f"DB insert error: {e}"
         return 0
-
-# === OLD: insert into stopevent table (not used in Trip-mode, kept for debugging) ===
-# def insert_into_stopevent_db(df):
-#     if df.empty:
-#         return 0
-#     try:
-#         conn = psycopg2.connect(**DB_CONFIG)
-#         cursor = conn.cursor()
-#         output = io.StringIO()
-#         df.to_csv(output, sep=',', header=False, index=False)
-#         output.seek(0)
-#         cursor.copy_from(
-#             output,
-#             'stopevent',
-#             sep=',',
-#             columns=(
-#                 'vehicle_number', 'leave_time', 'train', 'route_number', 'direction',
-#                 'service_key', 'trip_number', 'stop_time', 'arrive_time', 'dwell',
-#                 'location_id', 'door', 'lift', 'ons', 'offs', 'estimated_load',
-#                 'maximum_speed', 'train_mileage', 'pattern_distance', 'location_distance',
-#                 'x_coordinate', 'y_coordinate', 'data_source', 'schedule_status',
-#                 'pdx_trip', 'service_date'
-#             )
-#         )
-#         conn.commit()
-#         cursor.close()
-#         conn.close()
-#         logger.info(f"Inserted {len(df)} records into StopEvent table.")
-#         return len(df)
-#     except Exception as e:
-#         error_type = "db_insert_error"
-#         error_counters[error_type] += 1
-#         if error_type not in error_first_message:
-#             error_first_message[error_type] = f"DB insert error: {e}"
-#         return 0
 
 def print_error_summary():
     logger.info("\nError summary:")
@@ -307,10 +246,8 @@ def main():
 
     logger.info("Validating and transforming into DB...")
     df = validate_and_transform()
-    inserted = insert_into_trip_db(df)  # <--- Insert into Trip table
 
-    # Uncomment below to insert into stopevent table instead
-    # inserted = insert_into_stopevent_db(df)
+    inserted = insert_into_stopevent_db(df)
 
     print_error_summary()
     discarded = ctx.total_received - inserted
