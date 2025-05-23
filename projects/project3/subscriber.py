@@ -20,10 +20,10 @@ IDLE_TIMEOUT = 60  # 60 seconds
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = CREDENTIAL_PATH
 
 DB_CONFIG = {
-    "dbname": "postgres",
-    "user": "postgres",
-    "password": "psql908243",
-    "host": "localhost",
+    "dbname": "XXXXXX",
+    "user": "XXXXXX",
+    "password": "XXXXXX",
+    "host": "XXXXXX",
     "port": "5432"
 }
 
