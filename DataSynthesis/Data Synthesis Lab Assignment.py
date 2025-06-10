@@ -37,6 +37,8 @@ employee_departments = np.random.choice(departments, size=n_employees, p=dept_we
 # 2. For each employee, assign a random role from their department
 emp_data = []
 genders = ['Male', 'Female', 'Other']
+countries = ['USA', 'India', 'China', 'Mexico', 'Canada', 'Philippines', 'Taiwan', 'South Korea']
+country_weights = [0.7, 0.07, 0.06, 0.05, 0.04, 0.03, 0.025, 0.025]
 
 for i in range(n_employees):
     dept = employee_departments[i]
@@ -50,7 +52,7 @@ for i in range(n_employees):
     salary = np.random.uniform(role_row['Lower'], role_row['Upper'])
     emp = {
         'employeeID': i + 1,
-        'CountryOfBirth': fake.country(),
+        'CountryOfBirth': np.random.choice(countries, p=country_weights),
         'name': fake.name(),
         'phone': fake.phone_number(),
         'email': fake.email(),
