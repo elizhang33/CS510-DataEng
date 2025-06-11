@@ -17,7 +17,6 @@ import numpy as np
 from faker import Faker
 import random
 
-# Load department and role/salary data
 departments_df = pd.read_excel('/content/drive/MyDrive/Data Engineering - CS510/Lab Assignments for Xiangqian Zhang/Departments Roles and Salaries.xlsx', sheet_name='Departments')
 roles_salaries_df = pd.read_excel('/content/drive/MyDrive/Data Engineering - CS510/Lab Assignments for Xiangqian Zhang/Departments Roles and Salaries.xlsx', sheet_name='RolesAndSalaries')
 
@@ -34,26 +33,51 @@ dept_weights = dept_weights / np.sum(dept_weights)  # ensure it sums to 1
 
 employee_departments = np.random.choice(departments, size=n_employees, p=dept_weights)
 
-# 2. For each employee, assign a random role from their department
-emp_data = []
-genders = ['Male', 'Female', 'Other']
 countries = ['USA', 'India', 'China', 'Mexico', 'Canada', 'Philippines', 'Taiwan', 'South Korea']
-country_weights = [0.7, 0.07, 0.06, 0.05, 0.04, 0.03, 0.025, 0.025]
+us_weight = 0.60
+other_countries = countries[1:]
+other_weights_raw = [26.2, 11.8, 0.6, 1.0, 0.6, 0.6, 0.9]
+other_weights = np.array(other_weights_raw) / np.sum(other_weights_raw)  # normalized to sum to 1
+
+# Faker locale mapping for names
+locales = {
+    'USA': 'en_US',
+    'India': 'en_IN',
+    'China': 'zh_CN',
+    'Mexico': 'es_MX',
+    'Canada': 'en_CA',
+    'Philippines': 'en_PH', 
+    'Taiwan': 'zh_TW',
+    'South Korea': 'ko_KR'
+}
+genders = ['Male', 'Female', 'Other']
+
+emp_data = []
 
 for i in range(n_employees):
     dept = employee_departments[i]
     roles_for_dept = roles_salaries_df[roles_salaries_df['Department'] == dept]
     if len(roles_for_dept) == 0:
-        # fallback: pick any role if department not in RolesAndSalaries
         role_row = roles_salaries_df.sample(1).iloc[0]
     else:
         role_row = roles_for_dept.sample(1).iloc[0]
     role = role_row['Role']
     salary = np.random.uniform(role_row['Lower'], role_row['Upper'])
+    # Assign CountryOfBirth
+    if random.random() < us_weight:
+        country = 'USA'
+    else:
+        country = np.random.choice(other_countries, p=other_weights)
+    # Use Faker with appropriate locale for names
+    try:
+        fake_local = Faker(locales[country])
+    except:
+        fake_local = Faker('en_US')
+    person_name = fake_local.name()
     emp = {
         'employeeID': i + 1,
-        'CountryOfBirth': np.random.choice(countries, p=country_weights),
-        'name': fake.name(),
+        'CountryOfBirth': country,
+        'name': person_name,
         'phone': fake.phone_number(),
         'email': fake.email(),
         'gender': random.choice(genders),
@@ -69,6 +93,7 @@ for i in range(n_employees):
 emp_df = pd.DataFrame(emp_data)
 
 print(emp_df.head())
+
 
 """2.
 Show a screenshot of the output of emp_df.describe(include=’all’)
